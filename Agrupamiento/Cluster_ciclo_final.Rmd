@@ -1,0 +1,150 @@
+---
+title: "Cluster_2023_1"
+output: word_document
+date: "2023-03-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cargar librerías}
+library(pvclust)
+library(corrplot)
+library(car)
+library(factoextra)
+library(e1071)
+library(caret)
+
+```
+
+```{r cargar los conjuntos de datos}
+datos<-read.csv(file=file.choose(),header=T,sep=';')
+attach(datos)
+
+
+
+```
+
+```{r matriz de correlaciones}
+cont<-datos[,c(3:12,18:23)]
+corr_matrix<-cor(cont)
+corr_matrix
+corrplot(corr_matrix, method = "number")
+corrplot.mixed(corr_matrix, lower="number", upper="ellipse")
+corrplot.mixed(corr_matrix, lower="number", upper="circle")
+```
+```{r PCA}
+"Cálculo del PCA"
+res.pca = prcomp(cont, scale = TRUE)# si no quiero estandarizar scale = FALSE
+res.pca
+
+"solicito las tablas"
+get_pca_var(res.pca)
+get_eig(res.pca)#tabla de eigenvalores varianza acumulada
+
+"las gráficas"
+fviz_eig(res.pca)
+fviz_screeplot(res.pca, addlabels = TRUE, ylim = c(0, 100))#screeplot
+fviz_pca_ind(res.pca, repel=F,cex=0.5)#gr?fico individuos y PCA
+fviz_pca_biplot(res.pca) #biplot
+biplot(x = res.pca, scale = 0.5, cex = 0.8,col = c("blue4", "brown3"))
+fviz_pca_var(res.pca, col.var = "black") #grafico de pesos de los componentes
+fviz_pca_var(res.pca, col.var="contrib",gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),repel = TRUE)#grafico de pesos de los componentes a color
+
+"Cálculo de los componentes"
+pred<-predict(res.pca)
+datos<-cbind(datos,pred)
+
+```
+
+```{r cluster para las variables puras}
+"Para seleccionar el número óptimo de cluster"
+comp<-datos[,c(26:29)]
+fviz_nbclust(comp,kmeans,method = "silhouette")
+fviz_nbclust(comp,kmeans,method = "wss")
+
+"La estimación del cluster jerárquico"
+res_HC_comp<-eclust(comp,"hclust",k=4,graph = TRUE)
+
+"El dendograma"
+fviz_dend(res_HC_comp,kmeans,palette="jco",rect = TRUE,show_labels = TRUE)
+
+"los individuos"
+fviz_cluster(res_HC_comp,ellipse.type = "convex",palette="jco",labelsize = 8)
+
+"para guardar los cluster"
+HC4_comp<-cutree(res_HC_comp,k=4)#HAGO K=3 GRUPOS
+datos_cluster<-cbind(datos,HC4_comp)
+write.csv2(datos_cluster, file="datos_HC4.csv",row.names=T)
+
+datos_c1 <- datos_cluster[datos_cluster$HC4_comp == "1", c(2:12,24,25)]
+datos_c2 <- datos_cluster[datos_cluster$HC4_comp == "2", c(2:12,24,25)]
+datos_c3 <- datos_cluster[datos_cluster$HC4_comp == "3", c(2:12,24,25)]
+datos_c4 <- datos_cluster[datos_cluster$HC4_comp == "3", c(2:12,24,25)]
+
+resumenC1<-as.table(summary(datos_c1)) 
+resumenC2<-as.table(summary(datos_c2))
+resumenC3<-as.table(summary(datos_c3))
+resumenC4<-as.table(summary(datos_c4))
+
+write.table(resumenC1,file="resumenC1.csv")
+write.table(resumenC2,file="resumenC2.csv")
+write.table(resumenC3,file="resumenC3.csv")
+write.table(resumenC4,file="resumenC4.csv")
+
+
+```
+
+```{r SVM para clasificación}
+
+
+
+#ggplot(data = datos, aes(x = t_ralenti, y = t_mov, color = as.factor(HC4_comp))) +
+#  geom_point(size = 6) +
+#  theme_bw() +
+#  theme(legend.position = "none")
+
+HC4_comp <- as.factor(HC4_comp)
+
+"Dividimos los datos"
+attach(datos_cluster)
+head(datos_cluster)
+set.seed(101) 
+sample <- sample.int(n = nrow(datos_cluster), size = floor(.8*nrow(datos_cluster)), replace = F)
+training<- datos_cluster[sample, ]
+testing  <- datos_cluster[-sample, ]
+
+"Con las variables originales"
+modelo_svm_puros <- svm(formula = HC4_comp ~ Speed_mean+Speed_max+Acel_pos_mean+Acel_pos_max+Acel_neg_mean+	Acel_neg_max+Duration+Distance+time_ralenti+time_mov+Pend200_pos_mean+Pend200_pos_max+Pend200_neg_mean+	Pend200_neg_max+time_Pend200_pos+time_Pend200_neg
+, data = datos, kernel = "linear", cost = 10, scale = TRUE,datos=training)
+summary(modelo_svm_puros)
+
+
+"Con los PCA"
+modelo_svm_PCA <- svm(formula = HC4_comp ~ PC1+PC2+PC3+PC4, data = datos, kernel = "linear", cost = 10, scale = TRUE,datos=training)
+summary(modelo_svm_PCA)
+
+
+"Los errores"
+newdata<-testing
+predicciones_puros <- predict(modelo_svm_puros,newdata)
+pred <- predict(modelo_svm_puros, newdata, decision.values = TRUE)
+predpuros<-as.data.frame(predicciones_puros) 
+
+predicciones_pca <- predict(modelo_svm_PCA,newdata, decision.values = TRUE)
+predpca<-as.data.frame(predicciones_pca) 
+
+HC4_comp_test<-as.factor(testing$HC4_comp)
+
+
+pred_puros<-as.factor(predicciones_puros)
+pred_pca<-as.factor(predicciones_pca)
+matriz_conf_puros<-confusionMatrix(HC4_comp_test, pred_puros)
+matriz_conf_pca<-confusionMatrix(HC4_comp_test, pred_pca)
+matriz_conf_puros
+matriz_conf_pca
+
+```
+
+
